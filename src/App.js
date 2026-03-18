@@ -16,32 +16,39 @@ function App() {
   };
 
   useEffect(() => {
-    if (!joined) return;
+  if (!joined) return;
 
-    // Listen to messages in the specific room
-    const q = query(collection(db, "chats", room, "messages"), orderBy("createdAt", "asc"));
-    
-    const unsub = onSnapshot(q, async (snap) => {
-      const decodedMsgs = await Promise.all(snap.docs.map(async d => {
-        const data = d.data();
-        // Decrypt the message using the Room Code as the key
+  console.log("Attempting to connect to Room:", room);
+
+  const q = query(collection(db, "chats", room, "messages"), orderBy("createdAt", "asc"));
+  
+  const unsub = onSnapshot(q, async (snap) => {
+    console.log("Snapshot received! Number of messages:", snap.size);
+
+    const decodedMsgs = await Promise.all(snap.docs.map(async d => {
+      const data = d.data();
+      console.log("Raw data from Firebase:", data);
+
+      try {
+        // If decryption fails, it will catch the error and show "Lock" icon
         const content = await decrypt(data.payload, room);
-        return { 
-          id: d.id, 
-          content, 
-          senderId: data.senderId,
-          createdAt: data.createdAt 
-        };
-      }));
-      setMessages(decodedMsgs);
-      scrollToBottom();
-    }, (err) => {
-      console.error("Firestore Error:", err);
-      alert("Make sure your Firestore Rules allow access!");
-    });
+        return { id: d.id, content, ...data };
+      } catch (err) {
+        console.error("Decryption failed for msg:", d.id);
+        return { id: d.id, content: "🔒 Decryption Error", ...data };
+      }
+    }));
 
-    return () => unsub();
-  }, [joined, room]);
+    setMessages(decodedMsgs);
+  }, (err) => {
+    console.error("FIREBASE ERROR:", err.code, err.message);
+    if (err.code === 'permission-denied') {
+      alert("Security Rules are blocking the app. Check your Firebase Rules tab!");
+    }
+  });
+
+  return () => unsub();
+}, [joined, room]);
 
   const handleSend = async (e) => {
     e.preventDefault();
