@@ -14,7 +14,14 @@ function App() {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
-
+const [myId] = useState(() => {
+  // Check if we already have an ID, otherwise create a new one
+  const savedId = localStorage.getItem('chat_user_id');
+  if (savedId) return savedId;
+  const newId = 'user_' + Math.random().toString(36).substr(2, 9);
+  localStorage.setItem('chat_user_id', newId);
+  return newId;
+});
   useEffect(() => {
   if (!joined) return;
 
