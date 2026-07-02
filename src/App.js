@@ -45,6 +45,7 @@ function App() {
           allowLocalhostAsSecure: true, // Allows testing setups over localhost
           notifyButton: {
             enable: true, // Shows the visual subscription bell toggle on screen
+            position:'bottom-left'
           },
         });
         console.log("OneSignal successfully initialized!");
