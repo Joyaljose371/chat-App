@@ -135,8 +135,8 @@ function App() {
           method: "POST",
           headers: {
             "Content-Type": "application/json; charset=utf-8",
-            // 🔒 SECURE: Pulled dynamically from your local system environment variables
-            "Authorization": `Basic ${process.env.REACT_APP_ONESIGNAL_REST_KEY}`
+            // 🔑 THE FIX: Use "Key" instead of "Basic" before your environment variable token!
+            "Authorization": `Key ${process.env.REACT_APP_ONESIGNAL_REST_KEY}`
           },
           body: JSON.stringify({
             app_id: ONESIGNAL_APP_ID,
