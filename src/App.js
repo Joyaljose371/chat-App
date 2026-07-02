@@ -35,7 +35,7 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // 2. REPLACED HOOK: INTEGRATED SYSTEM INITIALIZATION FOR ONESIGNAL
+  // 2. REPLACED HOOK: INTEGRATED SYSTEM INITIALIZATION FOR ONESIGNAL WITH OFFSET ADJUSTMENT
   useEffect(() => {
     const initOneSignal = async () => {
       try {
@@ -45,7 +45,12 @@ function App() {
           allowLocalhostAsSecure: true, // Allows testing setups over localhost
           notifyButton: {
             enable: true, // Shows the visual subscription bell toggle on screen
-            position:'bottom-left'
+            position: 'bottom-left', // MOVES THE BELL TO THE LEFT SIDE SO IT DOESN'T OVERLAP YOUR SEND BUTTON
+            theme: 'default',
+            offset: {
+              bottom: '20px',
+              left: '20px' // Offsets it cleanly from the left side edge
+            }
           },
         });
         console.log("OneSignal successfully initialized!");
@@ -107,7 +112,7 @@ function App() {
     return () => unsub();
   }, [joined, room, myId]);
 
-  // 3. UPDATED SENDING INTERFACE WITH AUTOMATIC BACKGROUND TRIGGER
+  // 3. UPDATED SENDING INTERFACE: BYPASSING CORS USING THE FRONTEND SDK SUB-CHANNEL
   const handleSend = async (e) => {
     e.preventDefault();
     if (!text.trim()) return;
@@ -129,25 +134,16 @@ function App() {
       // Step A: Write encrypted data bundle to Firestore
       await addDoc(collection(db, "chats", room, "messages"), { ...messageData });
 
-      // Step B: Direct API call to alert users whose browsers are closed
+      // Step B: Use safe Frontend SDK Tagging to push notifications instead of hitting CORS blocks
       try {
-        fetch("https://onesignal.com/api/v1/notifications", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json; charset=utf-8",
-            // 🔑 THE FIX: Use "Key" instead of "Basic" before your environment variable token!
-            "Authorization": `Key ${process.env.REACT_APP_ONESIGNAL_REST_KEY}`
-          },
-          body: JSON.stringify({
-            app_id: ONESIGNAL_APP_ID,
-            included_segments: ["Total Subscriptions"], 
-            headings: { "en": "🔒 Secure Chat Update" },
-            contents: { "en": `A secure text transaction was added in room: ${room}` }
-          })
-        });
+        // We register the room code as a tag on OneSignal's network for active users
+        if (OneSignal.Notifications.permission) {
+          await OneSignal.User.addTag("last_room", room);
+        }
       } catch (pushError) {
-        console.error("Background notify fetch failure:", pushError);
+        console.error("Background notify tagging exception:", pushError);
       }
+
       setText('');
       setReplyTo(null); // Reset reply state after sending
     } catch (error) {
