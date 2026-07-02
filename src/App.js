@@ -2,9 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db } from './firebase';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { encrypt, decrypt } from './cryptoHelper';
-// 1. IMPORT FCM MESSAGING DEPENDENCIES
-import { getMessaging, getToken, onMessage } from "firebase/messaging";
-import { app } from "./firebase"; 
+// 1. IMPORT ONESIGNAL INSTEAD OF LOCAL FCM HOOKS
+import OneSignal from 'react-onesignal';
+
+// ⚠️ ONESIGNAL CONFIGURATION FROM YOUR KEYS
+const ONESIGNAL_APP_ID = "68948654-35b0-462a-929c-e899458a127d";
+const ONESIGNAL_SAFARI_ID = "web.onesignal.auto.251f0eae-dd1c-4527-b78a-dfbe622fe6a9";
 
 function App() {
   const [room, setRoom] = useState('');
@@ -32,41 +35,25 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // 2. INTEGRATED HOOK FOR FIREBASE CLOUD MESSAGING
+  // 2. REPLACED HOOK: INTEGRATED SYSTEM INITIALIZATION FOR ONESIGNAL
   useEffect(() => {
-    if (typeof window !== "undefined" && "Notification" in window) {
-      const messaging = getMessaging(app);
+    const initOneSignal = async () => {
+      try {
+        await OneSignal.init({
+          appId: ONESIGNAL_APP_ID,
+          safari_web_id: ONESIGNAL_SAFARI_ID,
+          allowLocalhostAsSecure: true, // Allows testing setups over localhost
+          notifyButton: {
+            enable: true, // Shows the visual subscription bell toggle on screen
+          },
+        });
+        console.log("OneSignal successfully initialized!");
+      } catch (error) {
+        console.error('An error occurred during OneSignal initialization:', error);
+      }
+    };
 
-      const requestNotificationPermission = async () => {
-        try {
-          const permission = await Notification.requestPermission();
-          if (permission === 'granted') {
-            const token = await getToken(messaging, { 
-              vapidKey: 'BNOt6lUpydC89eBFWH0C-Jgc8HVsMG6dNjud3USuvUzsOSmghrVE7vaiuWMIrxwacWRRrQCezZ3yv8BmtWbvorE' 
-            });
-            
-            if (token) {
-              console.log("FCM Device Registration Token:", token);
-            } else {
-              console.log('No registration token available. Request permissions.');
-            }
-          } else {
-            console.log('Permission denied for notifications.');
-          }
-        } catch (error) {
-          console.error('An error occurred while retrieving token:', error);
-        }
-      };
-
-      requestNotificationPermission();
-
-      const unsubscribeMessaging = onMessage(messaging, (payload) => {
-        console.log('Message intercepted in foreground: ', payload);
-        alert(`${payload.notification.title}: ${payload.notification.body}`);
-      });
-
-      return () => unsubscribeMessaging();
-    }
+    initOneSignal();
   }, []);
 
   useEffect(() => {
@@ -119,6 +106,7 @@ function App() {
     return () => unsub();
   }, [joined, room, myId]);
 
+  // 3. UPDATED SENDING INTERFACE WITH AUTOMATIC BACKGROUND TRIGGER
   const handleSend = async (e) => {
     e.preventDefault();
     if (!text.trim()) return;
@@ -137,7 +125,27 @@ function App() {
         messageData.replyToContent = replyTo.content;
       }
 
+      // Step A: Write encrypted data bundle to Firestore
       await addDoc(collection(db, "chats", room, "messages"), { ...messageData });
+
+      // Step B: Direct API call to alert users whose browsers are closed
+      try {
+        fetch("https://onesignal.com/api/v1/notifications", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json; charset=utf-8"
+          },
+          body: JSON.stringify({
+            app_id: ONESIGNAL_APP_ID,
+            included_segments: ["Total Subscriptions"], // Targets all background subscribers
+            headings: { "en": "🔒 Secure Chat Update" },
+            contents: { "en": `A secure text transaction was added in room: ${room}` }
+          })
+        });
+      } catch (pushError) {
+        console.error("Background notify fetch failure:", pushError);
+      }
+
       setText('');
       setReplyTo(null); // Reset reply state after sending
     } catch (error) {
