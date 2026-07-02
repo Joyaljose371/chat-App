@@ -1,8 +1,20 @@
 {
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/send-notification.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "package.json",
+      "use": "@vercel/static-build",
+      "config": { "distDir": "build" }
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/send-notification",
-      "destination": "/api/send-notification.js"
+      "destination": "api/send-notification.js"
     }
   ]
 }
