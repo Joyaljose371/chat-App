@@ -90,12 +90,34 @@ function App() {
           return { id: d.id, content: "🔒 Decryption Error", senderId: data.senderId };
         }
       }));
+
+      // INTEGRATED FOREGROUND SYSTEM LOCAL NOTIFICATIONS
+      if (snap.docChanges().length > 0) {
+        const lastChange = snap.docChanges()[snap.docChanges().length - 1];
+        if (lastChange.type === "added" && !snap.metadata.hasPendingWrites) {
+          const newMsgData = lastChange.doc.data();
+          if (newMsgData.senderId !== myId) {
+            try {
+              const clearText = await decrypt(newMsgData.payload, room);
+              if (Notification.permission === "granted") {
+                new Notification(`New Message in ${room}`, {
+                  body: clearText,
+                  icon: '/favicon.ico'
+                });
+              }
+            } catch (err) {
+              console.error("Failed to decrypt for notification", err);
+            }
+          }
+        }
+      }
+
       setMessages(decodedMsgs);
       scrollToBottom();
     });
 
     return () => unsub();
-  }, [joined, room]);
+  }, [joined, room, myId]);
 
   const handleSend = async (e) => {
     e.preventDefault();
