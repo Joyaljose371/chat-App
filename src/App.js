@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db } from './firebase';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { encrypt, decrypt } from './cryptoHelper';
+// 1. IMPORT FCM MESSAGING DEPENDENCIES
+import { getMessaging, getToken, onMessage } from "firebase/messaging";
+import { app } from "./firebase"; 
 
 function App() {
   const [room, setRoom] = useState('');
@@ -22,6 +25,47 @@ function App() {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+
+  // 2. INTEGRATED HOOK FOR FIREBASE CLOUD MESSAGING
+  useEffect(() => {
+    // Only attempt to configure notifications if browser environment supports it
+    if (typeof window !== "undefined" && "Notification" in window) {
+      const messaging = getMessaging(app);
+
+      const requestNotificationPermission = async () => {
+        try {
+          const permission = await Notification.requestPermission();
+          if (permission === 'granted') {
+            // ⚠️ REPLACE THIS STRING VALUE WITH YOUR ACTUAL VAPID WEB CERTIFICATE KEY FROM FIREBASE
+            const token = await getToken(messaging, { 
+              vapidKey: 'BNOt6lUpydC89eBFWH0C-Jgc8HVsMG6dNjud3USuvUzsOSmghrVE7vaiuWMIrxwacWRRrQCezZ3yv8BmtWbvorE' 
+            });
+            
+            if (token) {
+              console.log("FCM Device Registration Token:", token);
+              // Ready to be linked to user storage or session contexts
+            } else {
+              console.log('No registration token available. Request permissions.');
+            }
+          } else {
+            console.log('Permission denied for notifications.');
+          }
+        } catch (error) {
+          console.error('An error occurred while retrieving token:', error);
+        }
+      };
+
+      requestNotificationPermission();
+
+      // Foreground message intercept (Handles events if app is currently visible/focused)
+      const unsubscribeMessaging = onMessage(messaging, (payload) => {
+        console.log('Message intercepted in foreground: ', payload);
+        alert(`${payload.notification.title}: ${payload.notification.body}`);
+      });
+
+      return () => unsubscribeMessaging();
+    }
+  }, []);
 
   useEffect(() => {
     if (!joined) return;
