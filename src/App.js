@@ -112,7 +112,7 @@ function App() {
     return () => unsub();
   }, [joined, room, myId]);
 
-  // 3. UPDATED SENDING INTERFACE: BYPASSING CORS USING THE FRONTEND SDK SUB-CHANNEL
+  // 3. UPDATED SENDING INTERFACE: ROUTED THROUGH VERCEL SERVERLESS TO BYPASS CORS
   const handleSend = async (e) => {
     e.preventDefault();
     if (!text.trim()) return;
@@ -134,14 +134,17 @@ function App() {
       // Step A: Write encrypted data bundle to Firestore
       await addDoc(collection(db, "chats", room, "messages"), { ...messageData });
 
-      // Step B: Use safe Frontend SDK Tagging to push notifications instead of hitting CORS blocks
+      // Step B: Direct internal API call to our Vercel Serverless Function
       try {
-        // We register the room code as a tag on OneSignal's network for active users
-        if (OneSignal.Notifications.permission) {
-          await OneSignal.User.addTag("last_room", room);
-        }
+        fetch("/api/send-notification", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ room: room })
+        });
       } catch (pushError) {
-        console.error("Background notify tagging exception:", pushError);
+        console.error("Serverless endpoint delivery failure:", pushError);
       }
 
       setText('');
@@ -150,7 +153,6 @@ function App() {
       console.error("Encryption/Send Error:", error);
     }
   };
-
   // --- Native Touch Swipe Handlers ---
   const handleTouchStart = (e, msg) => {
     touchStartX.current = e.touches[0].clientX;
