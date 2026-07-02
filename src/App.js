@@ -134,11 +134,12 @@ function App() {
           method: "POST",
           headers: {
             "Content-Type": "application/json; charset=utf-8",
-            "Authorization": "Basic os_v2_app_nckimvbvwbdcveu45cmulcqspwzvwj54ouauq456swro2w6zxgeehwtnqqqx2iepl4k7k5efxdhxtcs5zyvcka2566ujez5vu7kmmty"
+            // 🔒 SECURE: Pulled dynamically from your local system environment variables
+            "Authorization": `Basic ${process.env.REACT_APP_ONESIGNAL_REST_KEY}`
           },
           body: JSON.stringify({
             app_id: ONESIGNAL_APP_ID,
-            included_segments: ["Total Subscriptions"], // Targets all background subscribers
+            included_segments: ["Total Subscriptions"], 
             headings: { "en": "🔒 Secure Chat Update" },
             contents: { "en": `A secure text transaction was added in room: ${room}` }
           })
@@ -146,7 +147,6 @@ function App() {
       } catch (pushError) {
         console.error("Background notify fetch failure:", pushError);
       }
-
       setText('');
       setReplyTo(null); // Reset reply state after sending
     } catch (error) {
