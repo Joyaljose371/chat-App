@@ -2,18 +2,21 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db } from './firebase';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { encrypt, decrypt } from './cryptoHelper';
-// 1. IMPORT FCM MESSAGING DEPENDENCIES
-import { getMessaging, getToken, onMessage } from "firebase/messaging";
-import { app } from "./firebase"; 
 
 function App() {
   const [room, setRoom] = useState('');
   const [joined, setJoined] = useState(false);
   const [text, setText] = useState('');
   const [messages, setMessages] = useState([]);
+  const [replyTo, setReplyTo] = useState(null); // Tracks the message being replied to
   const messagesEndRef = useRef(null);
 
-  // 1. PERSISTENT IDENTITY: Generates a unique ID for this browser/device
+  // Swipe tracking references
+  const touchStartX = useRef(0);
+  const activeSwipeId = useRef(null);
+  const [swipeOffset, setSwipeOffset] = useState({});
+
+  // PERSISTENT IDENTITY: Unique ID for this browser/device
   const [myId] = useState(() => {
     const savedId = localStorage.getItem('chat_user_id');
     if (savedId) return savedId;
@@ -26,64 +29,22 @@ function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // 2. INTEGRATED HOOK FOR FIREBASE CLOUD MESSAGING
-  useEffect(() => {
-    // Only attempt to configure notifications if browser environment supports it
-    if (typeof window !== "undefined" && "Notification" in window) {
-      const messaging = getMessaging(app);
-
-      const requestNotificationPermission = async () => {
-        try {
-          const permission = await Notification.requestPermission();
-          if (permission === 'granted') {
-            // ⚠️ REPLACE THIS STRING VALUE WITH YOUR ACTUAL VAPID WEB CERTIFICATE KEY FROM FIREBASE
-            const token = await getToken(messaging, { 
-              vapidKey: 'BNOt6lUpydC89eBFWH0C-Jgc8HVsMG6dNjud3USuvUzsOSmghrVE7vaiuWMIrxwacWRRrQCezZ3yv8BmtWbvorE' 
-            });
-            
-            if (token) {
-              console.log("FCM Device Registration Token:", token);
-              // Ready to be linked to user storage or session contexts
-            } else {
-              console.log('No registration token available. Request permissions.');
-            }
-          } else {
-            console.log('Permission denied for notifications.');
-          }
-        } catch (error) {
-          console.error('An error occurred while retrieving token:', error);
-        }
-      };
-
-      requestNotificationPermission();
-
-      // Foreground message intercept (Handles events if app is currently visible/focused)
-      const unsubscribeMessaging = onMessage(messaging, (payload) => {
-        console.log('Message intercepted in foreground: ', payload);
-        alert(`${payload.notification.title}: ${payload.notification.body}`);
-      });
-
-      return () => unsubscribeMessaging();
-    }
-  }, []);
-
   useEffect(() => {
     if (!joined) return;
 
-    // Listen to messages in the specific room
     const q = query(collection(db, "chats", room, "messages"), orderBy("createdAt", "asc"));
     
     const unsub = onSnapshot(q, async (snap) => {
       const decodedMsgs = await Promise.all(snap.docs.map(async d => {
         const data = d.data();
         try {
-          // Decrypt using the Room Code as the secret key
           const content = await decrypt(data.payload, room);
           return { 
             id: d.id, 
             content, 
             senderId: data.senderId,
-            createdAt: data.createdAt 
+            createdAt: data.createdAt,
+            replyToContent: data.replyToContent || null // Fallback if not a reply
           };
         } catch (e) {
           return { id: d.id, content: "🔒 Decryption Error", senderId: data.senderId };
@@ -102,15 +63,80 @@ function App() {
 
     try {
       const payload = await encrypt(text, room);
-      await addDoc(collection(db, "chats", room, "messages"), { 
+      
+      const messageData = { 
         payload, 
-        senderId: myId, // Attach your unique ID
+        senderId: myId,
         createdAt: serverTimestamp() 
-      });
+      };
+
+      // If this is a reply, attach the plain-text snippet of the parent message
+      if (replyTo) {
+        messageData.replyToContent = replyTo.content;
+      }
+
+      await addDoc(collection(db, "chats", room, "messages"), { ...messageData });
       setText('');
+      setReplyTo(null); // Reset reply state after sending
     } catch (error) {
       console.error("Encryption/Send Error:", error);
     }
+  };
+
+  // --- Native Touch Swipe Handlers ---
+  const handleTouchStart = (e, msg) => {
+    touchStartX.current = e.touches[0].clientX;
+    activeSwipeId.current = msg.id;
+  };
+
+  const handleTouchMove = (e) => {
+    if (!activeSwipeId.current) return;
+    const currentX = e.touches[0].clientX;
+    const diffX = currentX - touchStartX.current;
+
+    // Swipe right to reply (WhatsApp style)
+    if (diffX > 0 && diffX < 80) {
+      setSwipeOffset({ [activeSwipeId.current]: diffX });
+    }
+  };
+
+  const handleTouchEnd = (msg) => {
+    const currentOffset = swipeOffset[msg.id] || 0;
+    if (currentOffset > 50) {
+      setReplyTo(msg); // Trigger the reply state if swiped far enough
+    }
+    setSwipeOffset({});
+    activeSwipeId.current = null;
+  };
+
+  // --- Smart Date Header Formatter ---
+  const renderDateHeader = (currentMsg, index) => {
+    if (!currentMsg.createdAt) return null;
+    const currentDate = currentMsg.createdAt.toDate();
+    
+    // If it's the first message, always show the date banner
+    if (index === 0) return <div style={styles.dateHeader}>{formatDateLabel(currentDate)}</div>;
+
+    const prevMsg = messages[index - 1];
+    if (!prevMsg || !prevMsg.createdAt) return null;
+    const prevDate = prevMsg.createdAt.toDate();
+
+    // Check if the message belongs to a new calendar day
+    if (currentDate.toDateString() !== prevDate.toDateString()) {
+      return <div style={styles.dateHeader}>{formatDateLabel(currentDate)}</div>;
+    }
+    return null;
+  };
+
+  const formatDateLabel = (date) => {
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    if (date.toDateString() === today.toDateString()) return "Today";
+    if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+    
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
   // --- LOGIN SCREEN ---
@@ -150,35 +176,71 @@ function App() {
       </header>
       
       <div style={styles.messageArea}>
-        {messages.map((m) => {
-          // Identify if the message belongs to THIS device
+        {messages.map((m, index) => {
           const isMe = m.senderId === myId;
+          const currentXOffset = swipeOffset[m.id] || 0;
+
           return (
-            <div key={m.id} style={{ 
-              ...styles.bubbleWrapper, 
-              justifyContent: isMe ? 'flex-end' : 'flex-start' 
-            }}>
-              <div style={{ 
-                ...styles.bubble, 
-                backgroundColor: isMe ? '#007aff' : '#ffffff', 
-                color: isMe ? '#fff' : '#000',
-                borderBottomRightRadius: isMe ? '4px' : '18px',
-                borderBottomLeftRadius: isMe ? '18px' : '4px',
-                boxShadow: isMe ? '0 1px 2px rgba(0,122,255,0.3)' : '0 1px 2px rgba(0,0,0,0.1)'
-              }}>
-                <div style={{ wordBreak: 'break-word' }}>{m.content}</div>
-                <span style={{ 
-                  ...styles.timestamp, 
-                  color: isMe ? 'rgba(255,255,255,0.7)' : '#888' 
+            <React.Fragment key={m.id}>
+              {/* Inject Smart Date Separation Bars */}
+              {renderDateHeader(m, index)}
+
+              <div 
+                style={{ 
+                  ...styles.bubbleWrapper, 
+                  justifyContent: isMe ? 'flex-end' : 'flex-start',
+                  transform: `translateX(${currentXOffset}px)`,
+                  transition: currentXOffset === 0 ? 'transform 0.2s ease' : 'none'
+                }}
+                onTouchStart={(e) => handleTouchStart(e, m)}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={() => handleTouchEnd(m)}
+              >
+                <div style={{ 
+                  ...styles.bubble, 
+                  backgroundColor: isMe ? '#007aff' : '#ffffff', 
+                  color: isMe ? '#fff' : '#000',
+                  borderBottomRightRadius: isMe ? '4px' : '18px',
+                  borderBottomLeftRadius: isMe ? '18px' : '4px',
+                  boxShadow: isMe ? '0 1px 2px rgba(0,122,255,0.3)' : '0 1px 2px rgba(0,0,0,0.1)'
                 }}>
-                  {m.createdAt?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
+                  {/* Display reference if it's a reply message */}
+                  {m.replyToContent && (
+                    <div style={{
+                      ...styles.replyContextBox,
+                      backgroundColor: isMe ? 'rgba(255,255,255,0.15)' : '#f0f2f5',
+                      borderLeftColor: isMe ? '#fff' : '#007aff',
+                      color: isMe ? '#eee' : '#555'
+                    }}>
+                      {m.replyToContent}
+                    </div>
+                  )}
+
+                  <div style={{ wordBreak: 'break-word' }}>{m.content}</div>
+                  <span style={{ 
+                    ...styles.timestamp, 
+                    color: isMe ? 'rgba(255,255,255,0.7)' : '#888' 
+                  }}>
+                    {m.createdAt?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
               </div>
-            </div>
+            </React.Fragment>
           );
         })}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Reply UI Action Indicator Bar above Footer */}
+      {replyTo && (
+        <div style={styles.replyBarContainer}>
+          <div style={styles.replyIndicatorBox}>
+            <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#007aff' }}>Replying to message</span>
+            <p style={{ margin: '2px 0 0 0', fontSize: '13px', color: '#555', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{replyTo.content}</p>
+          </div>
+          <button style={styles.cancelReplyBtn} onClick={() => setReplyTo(null)}>✕</button>
+        </div>
+      )}
 
       <form onSubmit={handleSend} style={styles.inputBar}>
         <input 
@@ -212,10 +274,16 @@ const styles = {
   exitBtn: { background: 'none', border: 'none', color: '#ff3b30', cursor: 'pointer', fontSize: '14px' },
   
   messageArea: { flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '6px' },
-  bubbleWrapper: { display: 'flex', width: '100%', marginBottom: '4px' },
+  dateHeader: { alignSelf: 'center', backgroundColor: '#e5e5ea', color: '#555', fontSize: '11px', fontWeight: '600', padding: '4px 10px', borderRadius: '10px', margin: '12px 0', textTransform: 'uppercase' },
+  bubbleWrapper: { display: 'flex', width: '100%', marginBottom: '4px', userSelect: 'none' },
   bubble: { maxWidth: '80%', padding: '8px 14px', borderRadius: '18px', fontSize: '15px', display: 'flex', flexDirection: 'column' },
+  replyContextBox: { padding: '6px 10px', borderRadius: '6px', borderLeft: '3px solid', fontSize: '13px', marginBottom: '6px', fontStyle: 'italic', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   timestamp: { fontSize: '10px', marginTop: '4px', alignSelf: 'flex-end' },
   
+  replyBarContainer: { display: 'flex', padding: '8px 16px', backgroundColor: '#f0f2f5', borderTop: '1px solid #e5e5ea', alignItems: 'center', justifyContent: 'space-between' },
+  replyIndicatorBox: { borderLeft: '3px solid #007aff', paddingLeft: '8px', overflow: 'hidden', flex: 1 },
+  cancelReplyBtn: { background: 'none', border: 'none', color: '#8e8e93', fontSize: '16px', cursor: 'pointer', padding: '0 8px' },
+
   inputBar: { padding: '12px 16px', backgroundColor: '#fff', display: 'flex', alignItems: 'center', gap: '12px', borderTop: '1px solid #eee' },
   textInput: { flex: 1, padding: '10px 16px', borderRadius: '20px', border: '1px solid #e5e5ea', outline: 'none', backgroundColor: '#f2f2f7', fontSize: '15px' },
   sendBtn: { background: 'none', border: 'none', color: '#007aff', cursor: 'pointer', padding: '4px' }
