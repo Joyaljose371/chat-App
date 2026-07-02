@@ -180,21 +180,27 @@ function App() {
   };
 
   // --- Smart Date Header Formatter ---
+  // --- Smart Date Header Formatter (FIXED) ---
   const renderDateHeader = (currentMsg, index) => {
     if (!currentMsg.createdAt) return null;
     const currentDate = currentMsg.createdAt.toDate();
     
-    // If it's the first message, always show the date banner
-    if (index === 0) return <div style={styles.dateHeader}>{formatDateLabel(currentDate)}</div>;
+    // 1. If it's the first message ever, always show the date banner
+    if (index === 0) {
+      return <div style={styles.dateHeader}>{formatDateLabel(currentDate)}</div>;
+    }
 
     const prevMsg = messages[index - 1];
+    // 2. CRITICAL FIX: If the previous message has no timestamp yet, don't break, just skip header
     if (!prevMsg || !prevMsg.createdAt) return null;
     const prevDate = prevMsg.createdAt.toDate();
 
-    // Check if the message belongs to a new calendar day
+    // 3. Check if this message belongs to a completely new calendar day
     if (currentDate.toDateString() !== prevDate.toDateString()) {
       return <div style={styles.dateHeader}>{formatDateLabel(currentDate)}</div>;
     }
+    
+    // Fallback if it's the same day as the message right before it
     return null;
   };
 
