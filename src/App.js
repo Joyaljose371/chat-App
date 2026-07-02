@@ -133,7 +133,8 @@ function App() {
         fetch("https://onesignal.com/api/v1/notifications", {
           method: "POST",
           headers: {
-            "Content-Type": "application/json; charset=utf-8"
+            "Content-Type": "application/json; charset=utf-8",
+            "Authorization": "Basic os_v2_app_nckimvbvwbdcveu45cmulcqspwzvwj54ouauq456swro2w6zxgeehwtnqqqx2iepl4k7k5efxdhxtcs5zyvcka2566ujez5vu7kmmty"
           },
           body: JSON.stringify({
             app_id: ONESIGNAL_APP_ID,
